@@ -1,7 +1,7 @@
 # Smart Frequency-Based History for Zsh
 # https://github.com/yourusername/zsh-smart-history
 #
-# A Zsh plugin that overrides the Up key to search history by FREQUENCY.
+# A Zsh plugin that overrides the Up key to search history by FREQUENCY then RECENCY.
 #
 # Installation: Source this file in your .zshrc
 # See README.md for full instructions.
@@ -9,17 +9,21 @@
 # --- Configuration ---
 SMART_HISTORY_FILE="$HOME/.zsh_cmd_frequency_log"
 typeset -A _smart_cmd_freqs
+typeset -A _smart_cmd_recency
+_smart_current_index=0
 
-# --- 1. Frequency Tracking ---
+# --- 1. Frequency & Recency Tracking ---
 
 # Load existing frequencies on startup
 if [[ -f "$SMART_HISTORY_FILE" ]]; then
   # Simple parsing: specific implementation may vary, strictly dependent on file format.
   # Here we assume simpler line-by-line log for robustness, calculated on load.
-  # Optimization: You might want to compact this log file periodically.
   while read -r line; do
-    # Use 'let' with quoting to safely handle special chars in keys
-    let "_smart_cmd_freqs[\$line]++"
+    # Use 'let' for arithmetic to handle special chars in keys safely IF keys were variables,
+    # but for associative array keys in Zsh, direct assignment is often cleaner.
+    # However, let's stick to the previous pattern but add recency.
+    (( _smart_cmd_freqs[\$line]++ ))
+    _smart_cmd_recency[$line]=$((++_smart_current_index))
   done < "$SMART_HISTORY_FILE"
 fi
 
@@ -32,6 +36,8 @@ _smart_history_preexec() {
   if [[ -n "$cmd" ]]; then
     # Update memory
     (( _smart_cmd_freqs[$cmd]++ ))
+    _smart_cmd_recency[$cmd]=$((++_smart_current_index))
+    
     # Persist to log (append only for speed)
     print -r -- "$cmd" >> "$SMART_HISTORY_FILE"
   fi
@@ -46,11 +52,12 @@ _smart_history_index=0
 _smart_history_original_buffer=""
 
 _smart_history_up() {
+  setopt localoptions extendedglob
   # If we are continuing a search...
   if [[ $LASTWIDGET == "smart-history-up" ]]; then
     (( _smart_history_index++ ))
     if (( _smart_history_index > $#_smart_history_matches )); then
-       _smart_history_index=1 # Cycle back to top? Or stop? Let's cycle.
+       _smart_history_index=1 # Cycle back to top
     fi
     BUFFER="${_smart_history_matches[$_smart_history_index]}"
     CURSOR=$#BUFFER
@@ -62,48 +69,59 @@ _smart_history_up() {
   _smart_history_index=1 # 1-based index for zsh arrays
   _smart_history_matches=()
 
-  # 1. Identify candidates matching the current buffer prefix
-  local prefix="$BUFFER"
+  # 1. Identify candidates matching the current buffer (Fuzzy)
+  local search_term="$BUFFER"
   local -A candidates
   
-  # We search both our frequency DB AND the zsh history
-  # Merge them: frequency DB gives us the ranks, zsh history gives us recents.
-  # The requirement is "Rank by frequency".
-  # So we iterate over our _smart_cmd_freqs keys.
-  
+  # Construct Fuzzy Pattern: "a b" -> "*a*b*"
+  # We use Zsh's parameter expansion to replace every character? No, usually just spaces or empty -> *
+  # Simple fuzzy: Insert * between characters? Or just surround with *?
+  # User asked for "Fuzzy Matching".
+  # Let's do: *c*h*a*r*s* (interlace with *)
+  # But be careful with performance on massive history.
+  # Let's try "Smart Case" + "Boundaries".
+  # Construct Fuzzy Pattern: "a b" -> "*a*b*"
+  # True fuzzy matching needs wildcards between EVERY character
+  # s:: splits into chars, j:*: joins with *
+  local fuzzy_pattern="*${(j:*:)${(s::)search_term}}*"
+
   local -a scored_cmds
+  
+  # Iterate over all known commands
   for cmd count in "${(@kv)_smart_cmd_freqs}"; do
-    if [[ "$cmd" == "$prefix"* ]]; then
-      # Format: "count:cmd" for sorting
-      scored_cmds+=("$count:$cmd")
+    # Check match (case-insensitive usually preferred for fuzzy, let's use (#i) flag)
+    # properly quote the variable for pattern matching context
+    if [[ "$cmd" == (#i)$~fuzzy_pattern ]]; then
+      local recency="${_smart_cmd_recency[$cmd]}"
+      # Format for sorting: "freq:recency:cmd"
+      # We pad numbers with leading zeros to ensure correct string-based sorting
+      # 9 digits should be enough for both frequency and index.
+      local sort_key
+      printf -v sort_key "%09d:%09d:%s" "$count" "$recency" "$cmd"
+      scored_cmds+=("$sort_key")
     fi
   done
 
-  # Also include current history if not in DB (with count 0)?
-  # For simplicity, we rely on the DB which fills up as we work. 
-  # But to be useful immediately, we might want to grab recent history.
-  # Implementing "Hybrid" is complex. Let's stick to the requested "Analytics" approach.
-  # Note: The tool will learn as you type.
-  
   if [[ ${#scored_cmds} -eq 0 ]]; then
      zle up-line-or-history
      return
   fi
 
-  # 2. Sort by frequency (numeric descending)
-  # (On) flags: O = descending, n = numeric
+  # 2. Sort by Key (Frequency DESC, Recency DESC)
+  # (On) = Descending, Numeric (though padding makes string sort safe too)
+  # We use standard string sort (O) because we padded the numbers.
   local -a sorted_scored
-  sorted_scored=("${(@On)scored_cmds}")
+  sorted_scored=("${(@O)scored_cmds}")
 
-  # 3. Strip the scores to get clean commands (remove leading 'digits:')
-  _smart_history_matches=("${sorted_scored[@]#[0-9]*:}")
+  # 3. Strip the sort keys to get clean commands
+  # Remove the "FREQUEN:RECENCY:" prefix (two groups of digits and colons)
+  _smart_history_matches=("${sorted_scored[@]#[0-9]*:[0-9]*:}")
 
   # 4. Apply first match
   if [[ ${#_smart_history_matches} -ge 1 ]]; then
     BUFFER="${_smart_history_matches[1]}"
     CURSOR=$#BUFFER
   else
-    # Fallback if logic matches nothing (shouldn't happen given check above)
     zle up-line-or-history
   fi
 }
@@ -112,7 +130,6 @@ _smart_history_up() {
 zle -N smart-history-up _smart_history_up
 
 # --- 3. Key Bindings ---
-# Bind to Up Arrow. 
-# Note: Key codes vary (`^[[A` is standard for xterm/mac terminal).
 bindkey '^[[A' smart-history-up
 bindkey '^P' smart-history-up
+
