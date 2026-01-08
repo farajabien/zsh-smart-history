@@ -93,11 +93,13 @@ _smart_history_up() {
     # properly quote the variable for pattern matching context
     if [[ "$cmd" == (#i)$~fuzzy_pattern ]]; then
       local recency="${_smart_cmd_recency[$cmd]}"
-      # Format for sorting: "freq:recency:cmd"
+      # Format for sorting: "weighted_score:cmd"
+      # Recency is weighted 10x more than frequency
       # We pad numbers with leading zeros to ensure correct string-based sorting
       # 9 digits should be enough for both frequency and index.
+      local weighted_score=$(( (recency * 10) + count ))
       local sort_key
-      printf -v sort_key "%09d:%09d:%s" "$count" "$recency" "$cmd"
+      printf -v sort_key "%09d:%s" "$weighted_score" "$cmd"
       scored_cmds+=("$sort_key")
     fi
   done
@@ -107,15 +109,15 @@ _smart_history_up() {
      return
   fi
 
-  # 2. Sort by Key (Frequency DESC, Recency DESC)
+  # 2. Sort by Key (Weighted Score DESC)
   # (On) = Descending, Numeric (though padding makes string sort safe too)
   # We use standard string sort (O) because we padded the numbers.
   local -a sorted_scored
   sorted_scored=("${(@O)scored_cmds}")
 
   # 3. Strip the sort keys to get clean commands
-  # Remove the "FREQUEN:RECENCY:" prefix (two groups of digits and colons)
-  _smart_history_matches=("${sorted_scored[@]#[0-9]*:[0-9]*:}")
+  # Remove the "WEIGHTED_SCORE:" prefix (one group of digits and colon)
+  _smart_history_matches=("${sorted_scored[@]#[0-9]*:}")
 
   # 4. Apply first match
   if [[ ${#_smart_history_matches} -ge 1 ]]; then
@@ -126,10 +128,30 @@ _smart_history_up() {
   fi
 }
 
-# Define the widget
+_smart_history_down() {
+  setopt localoptions extendedglob
+  # If we are continuing a search (either from up or down)...
+  if [[ $LASTWIDGET == "smart-history-up" || $LASTWIDGET == "smart-history-down" ]]; then
+    (( _smart_history_index-- ))
+    if (( _smart_history_index < 1 )); then
+       _smart_history_index=$#_smart_history_matches # Cycle to end
+    fi
+    BUFFER="${_smart_history_matches[$_smart_history_index]}"
+    CURSOR=$#BUFFER
+    return
+  fi
+
+  # Not in a search, use standard down navigation
+  zle down-line-or-history
+}
+
+# Define the widgets
 zle -N smart-history-up _smart_history_up
+zle -N smart-history-down _smart_history_down
 
 # --- 3. Key Bindings ---
 bindkey '^[[A' smart-history-up
 bindkey '^P' smart-history-up
+bindkey '^[[B' smart-history-down
+bindkey '^N' smart-history-down
 
