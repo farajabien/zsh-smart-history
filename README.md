@@ -6,6 +6,8 @@ A lightweight, "smart" history search for Zsh that ranks suggestions by **freque
 
 - **Smart Ranking**: Prioritizes commands by **Frequency** (most used) and then **Recency** (last used).
 - **Fuzzy Matching**: Type `gc` to find `git commit`, or `npm s` for `npm run start`. Matches any characters in order.
+- **Smart Sync**: Automatically picks up commands typed in other open terminals instantaneously.
+- **Visual Stats**: View your most used commands with `smart_history_stats`.
 - **Self-Learning**: Automatically tracks usage stats in `~/.zsh_cmd_frequency_log` as you work.
 - **Zero Config**: Works out of the box with standard Zsh keybindings.
 
@@ -39,12 +41,14 @@ fc -ln 1 | while read -r line; do echo "$line" >> ~/.zsh_cmd_frequency_log; done
 
 - **Up Arrow**: Search history (ranked by frequency & recency).
 - **Type + Up Arrow**: Fuzzy search for commands (e.g., `gc` -> `git checkout`).
+- **`smart_history_stats`**: Run this command to see a bar chart of your top 20 most frequent commands.
 
 ## How it works
 
 1.  **Tracking**: Hooks into `preexec` to increment a counter for every command you run.
 2.  **Storage**: Saves stats to `~/.zsh_cmd_frequency_log` (simple text format).
-3.  **Widget**: Replaces the standard Up-arrow widget to fuzzy-match, sort, and display commands based on the log data.
+3.  **Sync**: Before every search, it checks for new entries from other terminals.
+4.  **Widget**: Replaces the standard Up-arrow widget to fuzzy-match, sort, and display commands based on the log data.
 
 ## License
 by farajabien 
