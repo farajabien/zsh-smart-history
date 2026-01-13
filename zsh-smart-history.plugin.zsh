@@ -6,6 +6,9 @@
 # Installation: Source this file in your .zshrc
 # See README.md for full instructions.
 
+# --- Load Required Modules ---
+autoload -Uz add-zsh-hook
+
 # --- Configuration ---
 SMART_HISTORY_FILE="$HOME/.zsh_cmd_frequency_log"
 typeset -A _smart_cmd_freqs
