@@ -10,33 +10,32 @@
 autoload -Uz add-zsh-hook
 
 # --- Configuration ---
-SMART_HISTORY_FILE="$HOME/.zsh_cmd_frequency_log"
+SMART_HISTORY_FILE="${SMART_HISTORY_FILE:-$HOME/.zsh_cmd_frequency_log}"
 typeset -A _smart_cmd_freqs
 typeset -A _smart_cmd_recency
-_smart_current_index=0
-_smart_history_last_loaded_line=0
+# Initialize to 0 only if unset
+: ${_smart_current_index:=0}
+: ${_smart_history_last_loaded_line:=0}
 
 # --- 1. Frequency & Recency Tracking ---
 
 _smart_history_load_new_entries() {
   if [[ -f "$SMART_HISTORY_FILE" ]]; then
-    # Get current line count
     local current_lines=$(wc -l < "$SMART_HISTORY_FILE" | tr -d ' ')
+
     
-    # If file grew, read new lines
     if (( current_lines > _smart_history_last_loaded_line )); then
       local lines_to_read=$(( current_lines - _smart_history_last_loaded_line ))
       
-      # Use process substitution to avoid subshell (keeps array modifications)
       local line
       local cur_freq
       while IFS= read -r line; do
         if [[ -n "$line" ]]; then
-           # Get current freq, default to 0
            cur_freq=${_smart_cmd_freqs[$line]:-0}
            _smart_cmd_freqs[$line]=$(( cur_freq + 1 ))
            (( _smart_current_index++ ))
            _smart_cmd_recency[$line]=$_smart_current_index
+
         fi
       done < <(tail -n "$lines_to_read" "$SMART_HISTORY_FILE")
       
@@ -45,24 +44,28 @@ _smart_history_load_new_entries() {
   fi
 }
 
-# Initial Load
-_smart_history_load_new_entries
+# Initial Load - only if we haven't loaded anything yet
+if [[ $_smart_history_last_loaded_line -eq 0 ]]; then
+  _smart_history_load_new_entries
+fi
 
 _smart_history_preexec() {
   local cmd="$1"
-  # Trim whitespace
   cmd="${cmd#"${cmd%%[![:space:]]*}"}"
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
   
   if [[ -n "$cmd" ]]; then
-    # Update memory - avoid math context with array keys for special chars
     local cur_freq=${_smart_cmd_freqs[$cmd]:-0}
     _smart_cmd_freqs[$cmd]=$(( cur_freq + 1 ))
     (( _smart_current_index++ ))
     _smart_cmd_recency[$cmd]=$_smart_current_index
     
     # Persist to log (append only for speed)
-    print -r -- "$cmd" >> "$SMART_HISTORY_FILE"
+    if print -r -- "$cmd" >> "$SMART_HISTORY_FILE"; then
+       # Increment last loaded line so we don't re-read our own command
+       (( _smart_history_last_loaded_line++ ))
+
+    fi
   fi
 }
 
