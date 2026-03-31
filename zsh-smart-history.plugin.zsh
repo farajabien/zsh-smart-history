@@ -122,11 +122,11 @@ _smart_history_up() {
     # Sort by recency (descending) and take top 5
     recent_cmds=("${(@On)recent_cmds}")
 
-    # Extract commands (remove recency prefix) and take first 5
+    # Extract commands (remove recency prefix) and take first 20
     _smart_history_matches=()
     local count=0
     for entry in "${recent_cmds[@]}"; do
-      if (( count >= 5 )); then
+      if (( count >= 20 )); then
         break
       fi
       _smart_history_matches+=("${entry#*:}")
