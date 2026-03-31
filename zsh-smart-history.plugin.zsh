@@ -23,19 +23,21 @@ _smart_history_load_new_entries() {
   if [[ -f "$SMART_HISTORY_FILE" ]]; then
     local current_lines=$(wc -l < "$SMART_HISTORY_FILE" | tr -d ' ')
 
-    
     if (( current_lines > _smart_history_last_loaded_line )); then
       local lines_to_read=$(( current_lines - _smart_history_last_loaded_line ))
       
       local line
       local cur_freq
+      local nl=$'\n'
       while IFS= read -r line; do
         if [[ -n "$line" ]]; then
+           # Decode newlines
+           line="${line//__SMART_HIST_NL__/$nl}"
+
            cur_freq=${_smart_cmd_freqs[$line]:-0}
            _smart_cmd_freqs[$line]=$(( cur_freq + 1 ))
            (( _smart_current_index++ ))
            _smart_cmd_recency[$line]=$_smart_current_index
-
         fi
       done < <(tail -n "$lines_to_read" "$SMART_HISTORY_FILE")
       
@@ -60,8 +62,11 @@ _smart_history_preexec() {
     (( _smart_current_index++ ))
     _smart_cmd_recency[$cmd]=$_smart_current_index
     
+    # Encode newlines for single-line persistence
+    local encoded_cmd="${cmd//$'\n'/__SMART_HIST_NL__}"
+
     # Persist to log (append only for speed)
-    if print -r -- "$cmd" >> "$SMART_HISTORY_FILE"; then
+    if print -r -- "$encoded_cmd" >> "$SMART_HISTORY_FILE"; then
        # Increment last loaded line so we don't re-read our own command
        (( _smart_history_last_loaded_line++ ))
 
