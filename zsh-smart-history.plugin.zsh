@@ -136,12 +136,22 @@ add-zsh-hook preexec _smart_history_preexec
 
 # --- 2. Helper Functions ---
 
+_smart_history_format_num() {
+  local num="$1"
+  local formatted=""
+  while [[ "$num" =~ '^[0-9]{4,}$' ]]; do
+    formatted=",${num: -3}$formatted"
+    num="${num:0:-3}"
+  done
+  echo "${num}${formatted}"
+}
+
 _smart_history_format_age() {
   local ts="$1"
   local now="${2:-${EPOCHSECONDS:-$(date +%s)}}"
 
   if [[ -z "$ts" || "$ts" -eq 0 ]]; then
-    echo "N/A"
+    echo "legacy"
     return
   fi
 
@@ -321,19 +331,16 @@ smart_history_stats() {
   fi
 
   local limit=${1:-20}
+  local header_title=""
   if [[ "$limit" == "all" ]]; then
-    echo "All Commands Ranked by Usage (Total: $total executions)"
+    header_title="All Commands Ranked by Usage"
     limit=0
   elif [[ "$limit" == <1-> ]]; then
-    echo "Top $limit Commands (Total: $total executions)"
+    header_title="Top $limit Commands"
   else
-    echo "Top 20 Commands (Total: $total executions)"
+    header_title="Top 20 Commands"
     limit=20
   fi
-
-  echo "----------------------------------------------------------------------------------------------------"
-  printf "%-4s | %-32s | %-22s | %-16s | %s\n" "Rank" "Command" "Usage Bar" "Count (%)" "Last Used"
-  echo "----------------------------------------------------------------------------------------------------"
 
   # Sort by frequency desc, then recency desc
   local -a sort_list
@@ -345,7 +352,35 @@ smart_history_stats() {
   
   # Sort numerically descending
   sort_list=("${(@O)sort_list}")
+
+  # Find max count for relative bar scaling
+  local max_count=1
+  if (( ${#sort_list} > 0 )); then
+    local top_item="${sort_list[1]}"
+    local top_count_str="${top_item%%:*}"
+    max_count=$(( 10#$top_count_str ))
+    if (( max_count == 0 )); then max_count=1; fi
+  fi
+
+  # Formatting setup
+  local formatted_total=$(_smart_history_format_num "$total")
   
+  # Optional Terminal ANSI Colors
+  local bold="" reset="" cyan="" green="" dim=""
+  if [[ -t 1 ]]; then
+    bold=$'\e[1m'
+    reset=$'\e[0m'
+    cyan=$'\e[36m'
+    green=$'\e[32m'
+    dim=$'\e[2m'
+  fi
+
+  echo ""
+  echo "${bold} ${header_title}${reset} ${dim}(Total: ${formatted_total} executions)${reset}"
+  echo "${dim}─────────────────────────────────────────────────────────────────────────────────────────────────────${reset}"
+  printf " ${bold}%-4s %-32s %-22s %-12s %-9s %-10s${reset}\n" "#" "Command" "Usage (Relative)" "Executions" "Share" "Last Used"
+  echo "${dim}─────────────────────────────────────────────────────────────────────────────────────────────────────${reset}"
+
   local i=0
   for item in "${sort_list[@]}"; do
     if (( limit > 0 && i >= limit )); then break; fi
@@ -357,27 +392,31 @@ smart_history_stats() {
     local count=$(( 10#$count_str ))
     local cmd="${rest#*:}"
     
-    # Calculate percentage
+    # Calculate percentage share of total
     local pct=$(( (count * 100.0) / total ))
-    
-    # Draw bar (20 chars max inside [ ... ])
-    local bar_len=$(( (pct * 20.0) / 100.0 ))
+
+    # Relative bar scaling against top command
+    local rel_pct=$(( (count * 100.0) / max_count ))
+    local bar_len=$(( (rel_pct * 20.0) / 100.0 ))
     if (( bar_len == 0 && count > 0 )); then bar_len=1; fi
+
     local bar=""
-    for ((b=0; b<bar_len; b++)); do bar+="="; done
-    for ((b=bar_len; b<20; b++)); do bar+=" "; done
+    for ((b=0; b<bar_len; b++)); do bar+="█"; done
+    for ((b=bar_len; b<20; b++)); do bar+="░"; done
     
-    local count_pct_str=$(printf "(%d) (%.1f%%)" "$count" "$pct")
+    local count_formatted=$(_smart_history_format_num "$count")
+    local pct_str=$(printf "(%.1f%%)" "$pct")
     local last_used=$(_smart_history_format_age "${_smart_cmd_last_time[$cmd]:-0}" "$now")
 
-    # Format command display (truncate display if very long)
+    # Format command display (truncate cleanly if long)
     local display_cmd="$cmd"
-    if (( ${#display_cmd} > 32 )); then
-      display_cmd="${display_cmd:0:29}..."
+    if (( ${#display_cmd} > 31 )); then
+      display_cmd="${display_cmd:0:28}..."
     fi
 
-    # Print table row
-    printf "%-4d | %-32s | [%s] | %-16s | %s\n" "$i" "$display_cmd" "$bar" "$count_pct_str" "$last_used"
+    printf " %s%2d.%s %-32s ${green}%-20s${reset} %12s %9s %-10s\n" \
+      "$cyan" "$i" "$reset" "$display_cmd" "$bar" "$count_formatted" "$pct_str" "$last_used"
   done
-  echo "----------------------------------------------------------------------------------------------------"
+  echo "${dim}─────────────────────────────────────────────────────────────────────────────────────────────────────${reset}"
+  echo ""
 }

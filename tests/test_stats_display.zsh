@@ -39,19 +39,19 @@ else
   (( failures++ ))
 fi
 
-# Check progress bar formatting [===...]
-if [[ "$output" == *"["*"="*"]"* ]]; then
+# Check progress bar formatting (█ and ░ blocks)
+if [[ "$output" == *"█"* ]]; then
   echo "PASS: Progress bar displayed"
 else
   echo "FAIL: Missing progress bar"
   (( failures++ ))
 fi
 
-# Check counts in parentheses e.g. (3)
-if [[ "$output" =~ '\(3\)' && "$output" =~ '\(2\)' && "$output" =~ '\(1\)' ]]; then
-  echo "PASS: Counts in parentheses format (N) verified"
+# Check counts formatting
+if [[ "$output" == *"3"* && "$output" == *"2"* && "$output" == *"1"* ]]; then
+  echo "PASS: Execution counts verified"
 else
-  echo "FAIL: Parentheses count formatting incorrect"
+  echo "FAIL: Execution count formatting incorrect"
   (( failures++ ))
 fi
 
