@@ -6,9 +6,9 @@ A lightweight, "smart" history search for Zsh that ranks suggestions by **freque
 
 - **Smart Ranking**: Prioritizes commands by **Frequency** (most used) and then **Recency** (last used).
 - **Fuzzy Matching**: Type `gc` to find `git commit`, or `npm s` for `npm run start`. Matches characters in order.
-- **Smart Sync**: Automatically picks up commands typed in other open terminals instantaneously.
-- **Visual Stats**: View your most used commands with `smart_history_stats`.
-- **Self-Learning**: Automatically tracks usage stats in `~/.zsh_cmd_frequency_log`.
+- **Instant Cross-Terminal Sync**: Automatically fetches and preserves commands typed in other open terminal windows prior to executing new commands.
+- **Timestamped Persistence**: Records Unix epoch timestamps (`<timestamp>|<encoded_cmd>`) for reliable recency and relative time calculations.
+- **Enhanced Usage Stats (`smart_history_stats`)**: Displays all ranked commands with visual progress bars, percentage shares, execution counts in parentheses, and relative last used times (e.g. `2m ago`, `1h ago`, `3d ago`).
 - **Zero Config**: Works out of the box with standard Zsh keybindings.
 
 ## Installation
@@ -28,30 +28,43 @@ A lightweight, "smart" history search for Zsh that ranks suggestions by **freque
     source ~/.zshrc
     ```
 
-### Seeding with existing history
+### Seeding & Migrating History
 
-To make it useful immediately, "feed" it your existing Zsh history:
+To import your existing `.zsh_history` or upgrade a legacy `.zsh_cmd_frequency_log`:
 
 ```zsh
-# Run this once to import your current history
-fc -ln 1 | while read -r line; do echo "$line" >> ~/.zsh_cmd_frequency_log; done
+# Run the migration script to format history entries with timestamps
+zsh migrate_history.zsh
 ```
 
 ## Usage
 
 - **Up Arrow**: Search history (ranked by Frequency & Recency).
 - **Type + Up Arrow**: Fuzzy search for commands (e.g., `gc` -> `git checkout`).
-- **`smart_history_stats`**: Run this command to see a bar chart of your top 20 most frequent commands.
+- **`smart_history_stats`**: View ranked usage list with progress bars, percentages, execution count `(count)`, and last used timestamps (`smart_history_stats` for all commands, or `smart_history_stats 10` for top 10).
+
+### Example Stats Output
+
+```text
+All Commands Ranked by Usage (Total: 45 executions)
+----------------------------------------------------------------------------------------------------
+Rank | Command                          | Usage Bar              | Count (%)        | Last Used
+----------------------------------------------------------------------------------------------------
+1    | git status                       | [====================] | (15) (33.3%)     | 2m ago
+2    | npm run dev                      | [============        ] | (9)  (20.0%)     | 15m ago
+3    | git commit -m "fix"              | [========            ] | (6)  (13.3%)     | 2h ago
+----------------------------------------------------------------------------------------------------
+```
 
 ## Troubleshooting
 
 ### "add-zsh-hook: command not found"
-The plugin attempts to load this automatically. If you see this error, ensure you are using a standard Zsh installation.
+The plugin loads this automatically. If you see this error, ensure you are using a standard Zsh installation.
 
 ### Commands not appearing?
 1. Ensure the plugin is sourced in your `.zshrc`.
 2. Check if `~/.zsh_cmd_frequency_log` exists and is writable.
-3. Run `smart_history_stats` to see if commands are being tracked.
+3. Run `smart_history_stats` to inspect recorded entries.
 
 ## License
 by farajabien 

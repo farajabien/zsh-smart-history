@@ -8,11 +8,13 @@
 
 # --- Load Required Modules ---
 autoload -Uz add-zsh-hook
+zmodload zsh/datetime 2>/dev/null
 
 # --- Configuration ---
 SMART_HISTORY_FILE="${SMART_HISTORY_FILE:-$HOME/.zsh_cmd_frequency_log}"
 typeset -A _smart_cmd_freqs
 typeset -A _smart_cmd_recency
+typeset -A _smart_cmd_last_time
 # Initialize to 0 only if unset
 : ${_smart_current_index:=0}
 : ${_smart_history_last_loaded_line:=0}
@@ -29,15 +31,29 @@ _smart_history_load_new_entries() {
       local line
       local cur_freq
       local nl=$'\n'
+      local ts cmd
       while IFS= read -r line; do
         if [[ -n "$line" ]]; then
-           # Decode newlines
-           line="${line//__SMART_HIST_NL__/$nl}"
+           # Check for timestamped log format: <timestamp>|<encoded_cmd>
+           if [[ "$line" == <1000000000->\|* ]]; then
+             ts="${line%%\|*}"
+             cmd="${line#*\|}"
+           else
+             ts=0
+             cmd="$line"
+           fi
 
-           cur_freq=${_smart_cmd_freqs[$line]:-0}
-           _smart_cmd_freqs[$line]=$(( cur_freq + 1 ))
+           # Decode newlines
+           cmd="${cmd//__SMART_HIST_NL__/$nl}"
+
+           cur_freq=${_smart_cmd_freqs[$cmd]:-0}
+           _smart_cmd_freqs[$cmd]=$(( cur_freq + 1 ))
            (( _smart_current_index++ ))
-           _smart_cmd_recency[$line]=$_smart_current_index
+           _smart_cmd_recency[$cmd]=$_smart_current_index
+
+           if (( ts > ${_smart_cmd_last_time[$cmd]:-0} )); then
+             _smart_cmd_last_time[$cmd]=$ts
+           fi
         fi
       done < <(tail -n "$lines_to_read" "$SMART_HISTORY_FILE")
       
@@ -57,26 +73,58 @@ _smart_history_preexec() {
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
   
   if [[ -n "$cmd" ]]; then
+    # Synchronize any new entries written by other terminal sessions first
+    _smart_history_load_new_entries
+
+    local now=${EPOCHSECONDS:-$(date +%s)}
     local cur_freq=${_smart_cmd_freqs[$cmd]:-0}
     _smart_cmd_freqs[$cmd]=$(( cur_freq + 1 ))
     (( _smart_current_index++ ))
     _smart_cmd_recency[$cmd]=$_smart_current_index
+    _smart_cmd_last_time[$cmd]=$now
     
     # Encode newlines for single-line persistence
     local encoded_cmd="${cmd//$'\n'/__SMART_HIST_NL__}"
+    local log_entry="${now}|${encoded_cmd}"
 
     # Persist to log (append only for speed)
-    if print -r -- "$encoded_cmd" >> "$SMART_HISTORY_FILE"; then
-       # Increment last loaded line so we don't re-read our own command
+    if print -r -- "$log_entry" >> "$SMART_HISTORY_FILE"; then
+       # Increment last loaded line so we stay in sync
        (( _smart_history_last_loaded_line++ ))
-
     fi
   fi
 }
 
 add-zsh-hook preexec _smart_history_preexec
 
-# --- 2. Smart Search Widget ---
+# --- 2. Helper Functions ---
+
+_smart_history_format_age() {
+  local ts="$1"
+  local now="${2:-${EPOCHSECONDS:-$(date +%s)}}"
+
+  if [[ -z "$ts" || "$ts" -eq 0 ]]; then
+    echo "N/A"
+    return
+  fi
+
+  local delta=$(( now - ts ))
+  if (( delta < 0 || delta < 10 )); then
+    echo "just now"
+  elif (( delta < 60 )); then
+    echo "${delta}s ago"
+  elif (( delta < 3600 )); then
+    echo "$(( delta / 60 ))m ago"
+  elif (( delta < 86400 )); then
+    echo "$(( delta / 3600 ))h ago"
+  elif (( delta < 2592000 )); then
+    echo "$(( delta / 86400 ))d ago"
+  else
+    echo "$(( delta / 2592000 ))mo ago"
+  fi
+}
+
+# --- 3. Smart Search Widget ---
 
 _smart_history_matches=()
 _smart_history_index=0
@@ -90,7 +138,6 @@ _smart_history_up() {
     if (( _smart_history_index >= $#_smart_history_matches )); then
        # Stay at the last match, do not cycle
        _smart_history_index=$#_smart_history_matches
-       # Optionally visual bell or verify behavior
     else
        (( _smart_history_index++ ))
     fi
@@ -152,8 +199,7 @@ _smart_history_up() {
     if [[ "$cmd" == (#i)$~fuzzy_pattern ]]; then
       local recency="${_smart_cmd_recency["$cmd"]}"
       local weighted_score=$(( (recency * 10) + count ))
-      local sort_key
-      printf -v sort_key "%09d:%s" "$weighted_score" "$cmd"
+      local sort_key="${(l:9::0:)weighted_score}:$cmd"
       scored_cmds+=("$sort_key")
     fi
   done
@@ -199,8 +245,6 @@ _smart_history_down() {
       return
     fi
     
-    # We do NOT wrap to the end anymore.
-    
     BUFFER="${_smart_history_matches[$_smart_history_index]}"
     CURSOR=$#BUFFER
     return
@@ -214,16 +258,19 @@ _smart_history_down() {
 zle -N smart-history-up _smart_history_up
 zle -N smart-history-down _smart_history_down
 
-# --- 3. Key Bindings ---
+# --- 4. Key Bindings ---
 bindkey '^[[A' smart-history-up
 bindkey '^P' smart-history-up
 bindkey '^[[B' smart-history-down
 bindkey '^N' smart-history-down
 
-# --- 4. Stats Widget ---
+# --- 5. Stats Widget ---
 smart_history_stats() {
+  _smart_history_load_new_entries
+
   local total=0
   local -A freqs
+  local now=${EPOCHSECONDS:-$(date +%s)}
   
   # Copy to local array and calculate total
   for cmd count in "${(@kv)_smart_cmd_freqs}"; do
@@ -236,42 +283,62 @@ smart_history_stats() {
     return
   fi
 
-  echo "Top 20 Commands (Total: $total executions)"
-  echo "----------------------------------------------------------------"
-  printf "%-30s | %-20s | %s\n" "Command" "Frequency" "Count"
-  echo "----------------------------------------------------------------"
+  local limit=$1
+  if [[ -n "$limit" && "$limit" != "all" && "$limit" == <1-> ]]; then
+    echo "Top $limit Commands (Total: $total executions)"
+  else
+    echo "All Commands Ranked by Usage (Total: $total executions)"
+    limit=0
+  fi
+  echo "----------------------------------------------------------------------------------------------------"
+  printf "%-4s | %-32s | %-22s | %-16s | %s\n" "Rank" "Command" "Usage Bar" "Count (%)" "Last Used"
+  echo "----------------------------------------------------------------------------------------------------"
 
-  # Sort by frequency desc
+  # Sort by frequency desc, then recency desc
   local -a sort_list
   for cmd count in "${(@kv)freqs}"; do
-      sort_list+=("$count:$cmd") 
+    local recency="${_smart_cmd_recency[$cmd]:-0}"
+    local sort_key="${(l:9::0:)count}:${(l:9::0:)recency}:$cmd"
+    sort_list+=("$sort_key") 
   done
   
   # Sort numerically descending
-  sort_list=("${(@On)sort_list}")
+  sort_list=("${(@O)sort_list}")
   
   local i=0
   for item in "${sort_list[@]}"; do
-    if (( i >= 20 )); then break; fi
-    
-    local count="${item%%:*}"
-    local cmd="${item#*:}"
+    if (( limit > 0 && i >= limit )); then break; fi
+    (( i++ ))
+
+    # Item is count:recency:cmd
+    local rest="${item#*:}"
+    local count_str="${item%%:*}"
+    local count=$(( 10#$count_str ))
+    local cmd="${rest#*:}"
     
     # Calculate percentage
     local pct=$(( (count * 100.0) / total ))
-    local int_pct=${pct%.*} # Integer part
     
-    # Draw bar (20 chars max)
-    local bar_len=$(( (int_pct * 20) / 100 ))
+    # Draw bar (20 chars max inside [ ... ])
+    local bar_len=$(( (pct * 20.0) / 100.0 ))
     if (( bar_len == 0 && count > 0 )); then bar_len=1; fi
     local bar=""
     for ((b=0; b<bar_len; b++)); do bar+="="; done
     for ((b=bar_len; b<20; b++)); do bar+=" "; done
     
+    local count_pct_str=$(printf "(%d) (%.1f%%)" "$count" "$pct")
+    local last_used=$(_smart_history_format_age "${_smart_cmd_last_time[$cmd]:-0}" "$now")
+
+    # Format command display (truncate display if very long)
+    local display_cmd="$cmd"
+    if (( ${#display_cmd} > 32 )); then
+      display_cmd="${display_cmd:0:29}..."
+    fi
+
     # Print table row
-    printf "%-30s | [%s] | %d (%.1f%%)\n" "${cmd:0:30}" "$bar" "$count" "$pct"
-    (( i++ ))
+    printf "%-4d | %-32s | [%s] | %-16s | %s\n" "$i" "$display_cmd" "$bar" "$count_pct_str" "$last_used"
   done
-  echo "----------------------------------------------------------------"
+  echo "----------------------------------------------------------------------------------------------------"
 }
+
 

@@ -8,16 +8,24 @@ if [[ ! -f "$HIST_FILE" ]]; then
   exit 1
 fi
 
-echo "Migrating $HIST_FILE to new single-line format..."
+echo "Migrating $HIST_FILE to timestamped single-line format..."
 
-# We use quoted EOF to prevent Zsh from interpreting the Python content.
-# We pass the paths as arguments to avoid needing shell expansion inside.
 python3 - "$HIST_FILE" "$TEMP_FILE" <<'EOF'
 import sys
+import time
+import re
 
 input_path = sys.argv[1]
 output_path = sys.argv[2]
 placeholder = "__SMART_HIST_NL__"
+now = int(time.time())
+
+def format_entry(cmd_lines):
+    full_str = placeholder.join(cmd_lines)
+    # Check if already timestamped: <digits_10+>|<cmd>
+    if re.match(r'^\d{10,}\|', full_str):
+        return full_str + '\n'
+    return f"{now}|{full_str}\n"
 
 with open(input_path, 'r', errors='replace') as f_in, open(output_path, 'w') as f_out:
     current_cmd = []
@@ -28,18 +36,15 @@ with open(input_path, 'r', errors='replace') as f_in, open(output_path, 'w') as 
         if not current_cmd:
             current_cmd.append(stripped)
         else:
-            # If the previous line ended with \, it's definitely continuation.
-            # Also, if the current line starts with significant whitespace (common in multi-line history).
             prev_line = current_cmd[-1]
             if prev_line.strip().endswith('\\') or line.startswith('  '):
                 current_cmd.append(stripped)
             else:
-                # Flush previous command
-                f_out.write(placeholder.join(current_cmd) + '\n')
+                f_out.write(format_entry(current_cmd))
                 current_cmd = [stripped]
                 
     if current_cmd:
-        f_out.write(placeholder.join(current_cmd) + '\n')
+        f_out.write(format_entry(current_cmd))
 EOF
 
 if [[ -f "$TEMP_FILE" ]]; then
@@ -49,3 +54,4 @@ else
   echo "Migration failed."
   exit 1
 fi
+
