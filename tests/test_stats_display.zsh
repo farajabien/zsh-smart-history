@@ -32,7 +32,7 @@ echo "\n--- Validating formatting requirements ---"
 failures=0
 
 # Check header
-if [[ "$output" == *"All Commands Ranked by Usage"* ]]; then
+if [[ "$output" == *"Commands (Total:"* ]]; then
   echo "PASS: Table header present"
 else
   echo "FAIL: Missing header"
