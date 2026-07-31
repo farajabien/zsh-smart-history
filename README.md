@@ -16,14 +16,14 @@ A lightweight, "smart" history search for Zsh that ranks suggestions by **freque
 ### Manual Installation
 
 1.  **Clone or Download** this repository.
-2.  **Source the script** in your `~/.zshrc`:
+2.  **Source the script** in your `~/.zshrc` (replace `/path/to/` with your actual repository folder path):
 
     ```zsh
-    # Example: if you cloned it to ~/.zsh_plugins/zsh-smart-history
-    source ~/.zsh_plugins/zsh-smart-history/zsh-smart-history.plugin.zsh
+    # Example for Desktop location:
+    source ~/Desktop/zsh-smart-history/zsh-smart-history.plugin.zsh
     ```
 
-3.  **Restart Zsh**:
+3.  **Restart Zsh** or source your config:
     ```zsh
     source ~/.zshrc
     ```

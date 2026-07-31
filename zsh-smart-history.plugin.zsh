@@ -19,6 +19,36 @@ typeset -A _smart_cmd_last_time
 : ${_smart_current_index:=0}
 : ${_smart_history_last_loaded_line:=0}
 
+# Helper to check if a command string is valid (filters out raw terminal output/paste garbage)
+_smart_history_is_valid_cmd() {
+  local cmd="$1"
+  if [[ -z "$cmd" ]]; then
+    return 1
+  fi
+  # Filter out single-character noise
+  if [[ "$cmd" == "." || "$cmd" == "+" || "$cmd" == "y" || "$cmd" == "}" ]]; then
+    return 1
+  fi
+  # Filter out tree characters, output log prefixes, and raw JS paste dumps
+  if [[ "$cmd" == [└├│─]* || \
+        "$cmd" == "Done in "* || \
+        "$cmd" == *"WARN"* || \
+        "$cmd" == "Progress:"* || \
+        "$cmd" == "devDependencies:"* || \
+        "$cmd" == "const "* || \
+        "$cmd" == "let "* || \
+        "$cmd" == "var "* || \
+        "$cmd" == "import "* || \
+        "$cmd" == "async function"* || \
+        "$cmd" == "}"* || \
+        "$cmd" == "{"* || \
+        "$cmd" == "//"* || \
+        "$cmd" == "/*"* ]]; then
+    return 1
+  fi
+  return 0
+}
+
 # --- 1. Frequency & Recency Tracking ---
 
 _smart_history_load_new_entries() {
@@ -46,13 +76,20 @@ _smart_history_load_new_entries() {
            # Decode newlines
            cmd="${cmd//__SMART_HIST_NL__/$nl}"
 
-           cur_freq=${_smart_cmd_freqs[$cmd]:-0}
-           _smart_cmd_freqs[$cmd]=$(( cur_freq + 1 ))
-           (( _smart_current_index++ ))
-           _smart_cmd_recency[$cmd]=$_smart_current_index
+           # Normalize whitespace (trim leading and trailing space)
+           cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+           cmd="${cmd%"${cmd##*[![:space:]]}"}"
 
-           if (( ts > ${_smart_cmd_last_time[$cmd]:-0} )); then
-             _smart_cmd_last_time[$cmd]=$ts
+           # Validate command string (skip output dumps)
+           if _smart_history_is_valid_cmd "$cmd"; then
+             cur_freq=${_smart_cmd_freqs[$cmd]:-0}
+             _smart_cmd_freqs[$cmd]=$(( cur_freq + 1 ))
+             (( _smart_current_index++ ))
+             _smart_cmd_recency[$cmd]=$_smart_current_index
+
+             if (( ts > ${_smart_cmd_last_time[$cmd]:-0} )); then
+               _smart_cmd_last_time[$cmd]=$ts
+             fi
            fi
         fi
       done < <(tail -n "$lines_to_read" "$SMART_HISTORY_FILE")
@@ -72,7 +109,7 @@ _smart_history_preexec() {
   cmd="${cmd#"${cmd%%[![:space:]]*}"}"
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
   
-  if [[ -n "$cmd" ]]; then
+  if [[ -n "$cmd" ]] && _smart_history_is_valid_cmd "$cmd"; then
     # Synchronize any new entries written by other terminal sessions first
     _smart_history_load_new_entries
 
@@ -283,13 +320,17 @@ smart_history_stats() {
     return
   fi
 
-  local limit=$1
-  if [[ -n "$limit" && "$limit" != "all" && "$limit" == <1-> ]]; then
-    echo "Top $limit Commands (Total: $total executions)"
-  else
+  local limit=${1:-20}
+  if [[ "$limit" == "all" ]]; then
     echo "All Commands Ranked by Usage (Total: $total executions)"
     limit=0
+  elif [[ "$limit" == <1-> ]]; then
+    echo "Top $limit Commands (Total: $total executions)"
+  else
+    echo "Top 20 Commands (Total: $total executions)"
+    limit=20
   fi
+
   echo "----------------------------------------------------------------------------------------------------"
   printf "%-4s | %-32s | %-22s | %-16s | %s\n" "Rank" "Command" "Usage Bar" "Count (%)" "Last Used"
   echo "----------------------------------------------------------------------------------------------------"
@@ -340,5 +381,3 @@ smart_history_stats() {
   done
   echo "----------------------------------------------------------------------------------------------------"
 }
-
-
