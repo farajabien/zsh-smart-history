@@ -52,6 +52,7 @@ _smart_history_is_valid_cmd() {
 # --- 1. Frequency & Recency Tracking ---
 
 _smart_history_load_new_entries() {
+  setopt localoptions extendedglob
   if [[ -f "$SMART_HISTORY_FILE" ]]; then
     local current_lines=$(wc -l < "$SMART_HISTORY_FILE" | tr -d ' ')
 
@@ -62,16 +63,23 @@ _smart_history_load_new_entries() {
       local cur_freq
       local nl=$'\n'
       local ts cmd
-      while IFS= read -r line; do
+      while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ -n "$line" ]]; then
-           # Check for timestamped log format: <timestamp>|<encoded_cmd>
-           if [[ "$line" == <1000000000->\|* ]]; then
-             ts="${line%%\|*}"
-             cmd="${line#*\|}"
-           else
-             ts=0
-             cmd="$line"
-           fi
+           ts=0
+           # Iteratively strip any leading timestamp prefix(es) (e.g. 1785612651|cmd or 1785612651|1785612651|cmd)
+           while [[ "$line" == [0-9]#\|* ]]; do
+             if (( ts == 0 )); then
+               ts="${line%%\|*}"
+             fi
+             line="${line#*\|}"
+           done
+
+           # Iteratively strip zsh extended history prefix if present (e.g., ": 1785612651:0;cmd")
+           while [[ "$line" == :\ [0-9]#:[0-9]#\;* ]]; do
+             line="${line#*\;}"
+           done
+
+           cmd="$line"
 
            # Decode newlines
            cmd="${cmd//__SMART_HIST_NL__/$nl}"
@@ -105,7 +113,17 @@ if [[ $_smart_history_last_loaded_line -eq 0 ]]; then
 fi
 
 _smart_history_preexec() {
+  setopt localoptions extendedglob
   local cmd="$1"
+
+  # Iteratively strip any accidental timestamp or extended history prefixes
+  while [[ "$cmd" == [0-9]#\|* ]]; do
+    cmd="${cmd#*\|}"
+  done
+  while [[ "$cmd" == :\ [0-9]#:[0-9]#\;* ]]; do
+    cmd="${cmd#*\;}"
+  done
+
   cmd="${cmd#"${cmd%%[![:space:]]*}"}"
   cmd="${cmd%"${cmd##*[![:space:]]}"}"
   

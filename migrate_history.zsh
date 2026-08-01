@@ -43,14 +43,21 @@ def process_entry(cmd_lines):
     if not full_str:
         return None
 
-    # Extract existing timestamp if present
-    match = re.match(r'^(\d{10,})\|(.*)$', full_str)
-    if match:
-        ts = match.group(1)
-        raw_cmd = match.group(2).strip()
-    else:
-        ts = str(now)
-        raw_cmd = full_str
+    # Iteratively extract existing timestamp if present and strip prefixes
+    raw_cmd = full_str
+    ts = str(now)
+    while True:
+        m = re.match(r'^(\d+)\|(.*)$', raw_cmd)
+        if m:
+            if ts == str(now):
+                ts = m.group(1)
+            raw_cmd = m.group(2).strip()
+            continue
+        m2 = re.match(r'^:\s*\d+:\d+;(.*)$', raw_cmd)
+        if m2:
+            raw_cmd = m2.group(1).strip()
+            continue
+        break
 
     # Normalize command (decode, strip, check validity)
     decoded = raw_cmd.replace(placeholder, '\n').strip()
